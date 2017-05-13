@@ -25,21 +25,6 @@ class WeatherStationActivity : Activity() {
     private val selectionSubject: BehaviorSubject<ReadingType> = BehaviorSubject.create()
     private val preferredUnitSubject: BehaviorSubject<Boolean> = BehaviorSubject.create();
 
-    val sensorReadingObservable: Observable<SensorReading> = Observable
-            .combineLatest(bmx280Observable.asObservable,
-                    selectionSubject,
-                    BiFunction({
-                        reading: SensorReading, type: ReadingType ->
-                        Pair(reading, type)
-                    })
-            )
-            .filter {
-                val (reading, type) = it
-                reading.type == type
-            }
-            .map {
-                it.first
-            }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Timber.plant(Timber.DebugTree())
@@ -49,15 +34,30 @@ class WeatherStationActivity : Activity() {
         val sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         bmx280Observable = Bmx280Observable(sensorManager)
 
-        selectionButton = getButton(BoardDefaults.SELECTION_PIN)
+        selectionButton = getButton(BoardDefaults.SELECTION_PIN, KeyEvent.KEYCODE_SPACE)
         selectionButton?.register()
 
-        preferredUnitToggle = getButton(BoardDefaults.UNIT_PIN)
+        preferredUnitToggle = getButton(BoardDefaults.UNIT_PIN, KeyEvent.KEYCODE_ENTER)
         preferredUnitToggle?.register()
 
         selectionSubject.onNext(ReadingType.TEMPERATURE)
         preferredUnitSubject.onNext(true)
 
+        val sensorReadingObservable: Observable<SensorReading> = Observable
+                .combineLatest(bmx280Observable.asObservable,
+                        selectionSubject,
+                        BiFunction({
+                            reading: SensorReading, type: ReadingType ->
+                            Pair(reading, type)
+                        })
+                )
+                .filter {
+                    val (reading, type) = it
+                    reading.type == type
+                }
+                .map {
+                    it.first
+                }
         Observable.combineLatest(sensorReadingObservable, preferredUnitSubject, BiFunction({
             reading: SensorReading, preferred: Boolean ->
                 displayString(reading, preferred)
@@ -130,28 +130,29 @@ class WeatherStationActivity : Activity() {
     }
 
     private fun displayString(reading: SensorReading, preferredUnit: Boolean): String {
-        val value = when (reading.type) {
+        val p: Pair<Float, String> = when (reading.type) {
             ReadingType.TEMPERATURE -> {
                 if (preferredUnit) {
-                    reading.value
+                    Pair(reading.value, "C")
                 } else {
-                    (9.0f / 5.0f) * reading.value + 32
+                    Pair((9.0f / 5.0f) * reading.value + 32, "F")
                 }
             }
             ReadingType.PRESSURE -> {
                 if (preferredUnit) {
-                    reading.value / 10.0f
+                    Pair(reading.value / 10.0f, "P")
                 } else {
-                    reading.value / 1013.25f
+                    Pair(reading.value / 1013.25f, "A")
                 }
             }
-            else -> 0.0f
+            else -> Pair(0.0f, "U")
         }
-        return value.toString()
+        val (v, u) = p
+        return v.toString().substring(0..3) + u
     }
 
-    private fun getButton(pin: String) = ButtonInputDriver(
+    private fun getButton(pin: String, keyCode: Int) = ButtonInputDriver(
             pin,
             Button.LogicState.PRESSED_WHEN_LOW,
-            KeyEvent.KEYCODE_ENTER)
+            keyCode)
 }
