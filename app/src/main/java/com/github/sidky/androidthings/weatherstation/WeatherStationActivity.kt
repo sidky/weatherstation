@@ -18,13 +18,28 @@ import java.io.IOException
 class WeatherStationActivity : Activity() {
 
     lateinit var bmx280Observable: Bmx280Observable
-    lateinit var alphaNumericDisplay: AlphanumericDisplay
-    lateinit var selectionButton: ButtonInputDriver
-    lateinit var preferredUnitToggle: ButtonInputDriver
 
+    var alphaNumericDisplay: AlphanumericDisplay? = null
+    var selectionButton: ButtonInputDriver? = null
+    var preferredUnitToggle: ButtonInputDriver? = null
     private val selectionSubject: BehaviorSubject<ReadingType> = BehaviorSubject.create()
     private val preferredUnitSubject: BehaviorSubject<Boolean> = BehaviorSubject.create();
 
+    val sensorReadingObservable: Observable<SensorReading> = Observable
+            .combineLatest(bmx280Observable.asObservable,
+                    selectionSubject,
+                    BiFunction({
+                        reading: SensorReading, type: ReadingType ->
+                        Pair(reading, type)
+                    })
+            )
+            .filter {
+                val (reading, type) = it
+                reading.type == type
+            }
+            .map {
+                it.first
+            }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Timber.plant(Timber.DebugTree())
@@ -34,32 +49,22 @@ class WeatherStationActivity : Activity() {
         val sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         bmx280Observable = Bmx280Observable(sensorManager)
 
-        selectionButton = ButtonInputDriver("BCM6", Button.LogicState.PRESSED_WHEN_LOW, KeyEvent.KEYCODE_SPACE)
-        selectionButton.register()
+        selectionButton = getButton(BoardDefaults.SELECTION_PIN)
+        selectionButton?.register()
 
-        preferredUnitToggle = ButtonInputDriver("BCM13", Button.LogicState.PRESSED_WHEN_LOW, KeyEvent.KEYCODE_ENTER)
-        preferredUnitToggle.register()
+        preferredUnitToggle = getButton(BoardDefaults.UNIT_PIN)
+        preferredUnitToggle?.register()
 
         selectionSubject.onNext(ReadingType.TEMPERATURE)
         preferredUnitSubject.onNext(true)
 
-        val valueObservable = Observable.combineLatest(bmx280Observable.asObservable, selectionSubject, BiFunction({
-            reading: SensorReading, type: ReadingType ->
-                Pair(reading, type)
-        })).filter {
-            val (reading, type) = it
-            reading.type == type
-        }.map {
-            it.first
-        }
-
-        Observable.combineLatest(valueObservable, preferredUnitSubject, BiFunction({
+        Observable.combineLatest(sensorReadingObservable, preferredUnitSubject, BiFunction({
             reading: SensorReading, preferred: Boolean ->
                 displayString(reading, preferred)
         })).subscribe(object : Consumer<String> {
             override fun accept(p0: String?) {
                 Timber.i("Reading: %s", p0)
-                alphaNumericDisplay.display(p0)
+                alphaNumericDisplay?.display(p0)
             }
         })
 
@@ -71,13 +76,25 @@ class WeatherStationActivity : Activity() {
         bmx280Observable.destroy()
 
         try {
-            alphaNumericDisplay.close()
+            alphaNumericDisplay?.close()
         } catch (ex: IOException) {
             Timber.e(ex, "Unable to close display")
         }
 
-        selectionButton.unregister()
-        preferredUnitToggle.unregister()
+        selectionButton?.unregister()
+        try {
+            selectionButton?.close()
+        } catch (ex: IOException) {
+            Timber.e(ex, "Unable to close reading toggle button")
+        }
+
+        preferredUnitToggle?.unregister()
+        try {
+            preferredUnitToggle?.close()
+        } catch (ex: IOException) {
+            Timber.e(ex, "Unable to close unit toggle button")
+        }
+
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -101,10 +118,15 @@ class WeatherStationActivity : Activity() {
     }
 
     private fun initializeDisplay() {
-        alphaNumericDisplay = AlphanumericDisplay("I2C1")
-        alphaNumericDisplay.setBrightness(1.0f)
-        alphaNumericDisplay.setEnabled(true)
-        alphaNumericDisplay.clear()
+        alphaNumericDisplay = try {
+            AlphanumericDisplay(BoardDefaults.I2C)
+        } catch (ex: IOException) {
+            Timber.e(ex, "Unable to initialize alphanumeric display")
+            null
+        }
+        alphaNumericDisplay?.setBrightness(1.0f)
+        alphaNumericDisplay?.setEnabled(true)
+        alphaNumericDisplay?.clear()
     }
 
     private fun displayString(reading: SensorReading, preferredUnit: Boolean): String {
@@ -127,4 +149,9 @@ class WeatherStationActivity : Activity() {
         }
         return value.toString()
     }
+
+    private fun getButton(pin: String) = ButtonInputDriver(
+            pin,
+            Button.LogicState.PRESSED_WHEN_LOW,
+            KeyEvent.KEYCODE_ENTER)
 }

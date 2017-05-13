@@ -33,7 +33,7 @@ class Bmx280Observable(val sensorManager: SensorManager) : SensorEventListener {
     }
 
     private val bmx280Driver = try {
-        Bmx280SensorDriver("I2C1")
+        Bmx280SensorDriver(BoardDefaults.I2C)
     } catch (ex: IOException) {
         Timber.e(ex, "Unable to open bmx280 sensor driver on I2C1")
         null
